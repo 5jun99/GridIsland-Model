@@ -126,53 +126,73 @@ class FeatureExtractor:
         return features
 
     def extract_window_features(self, window_data: pd.DataFrame) -> Dict[str, float]:
-        """윈도우 데이터에서 모든 특성 추출"""
+        """윈도우 데이터에서 핵심 특성만 추출 (휠체어 난이도 분석 최적화)"""
         features = {}
 
         # 가속도 데이터 준비
         acc_cols = ['acc_x', 'acc_y', 'acc_z']
         if all(col in window_data.columns for col in acc_cols):
             acc_data = window_data[acc_cols].values
-
-            # 가속도 벡터 크기
             acc_magnitude = np.sqrt(np.sum(acc_data**2, axis=1))
 
-            # 시간 도메인 특성
-            time_features = self.extract_time_domain_features(acc_magnitude)
-            for key, value in time_features.items():
-                features[f'acc_mag_{key}'] = value
+            # 핵심 시간 도메인 특성만 선별 (안정성, 부드러움 관련)
+            features['acc_mean'] = np.mean(acc_magnitude)
+            features['acc_std'] = np.std(acc_magnitude)
+            features['acc_rms'] = np.sqrt(np.mean(acc_magnitude**2))
+            features['acc_range'] = np.max(acc_magnitude) - np.min(acc_magnitude)
+            
+            # 충격 저항성 관련
+            features['acc_max'] = np.max(acc_magnitude)
+            diff = np.diff(acc_magnitude)
+            features['acc_mean_diff'] = np.mean(np.abs(diff))
+            
+            # 주요 주파수 특성 (진동 분석)
+            fft_values = fft(acc_magnitude)
+            fft_magnitude = np.abs(fft_values[:len(fft_values)//2])
+            freqs = np.fft.fftfreq(len(acc_magnitude), 1/50.0)[:len(fft_values)//2]
+            
+            # 저주파 에너지 (부드러운 움직임)
+            low_freq = fft_magnitude[(freqs >= 0) & (freqs < 2)]
+            total_energy = np.sum(fft_magnitude**2)
+            features['acc_low_freq_energy'] = np.sum(low_freq**2) / total_energy if total_energy > 0 else 0
+            
+            # 각 축별 핵심 특성 (방향성 안정성)
+            for i, axis in enumerate(['x', 'y', 'z']):
+                signal = acc_data[:, i]
+                features[f'acc_{axis}_std'] = np.std(signal)
+                features[f'acc_{axis}_range'] = np.max(signal) - np.min(signal)
 
-            # 주파수 도메인 특성
-            freq_features = self.extract_frequency_domain_features(acc_magnitude)
-            for key, value in freq_features.items():
-                features[f'acc_mag_{key}'] = value
-
-        # 자이로스코프 데이터 준비 (있으면)
+        # 자이로스코프 데이터 (회전 안정성)
         gyro_cols = ['gyro_x', 'gyro_y', 'gyro_z']
         if all(col in window_data.columns for col in gyro_cols):
             gyro_data = window_data[gyro_cols].values
             gyro_magnitude = np.sqrt(np.sum(gyro_data**2, axis=1))
-
-            # 자이로 특성
-            gyro_time_features = self.extract_time_domain_features(gyro_magnitude)
-            for key, value in gyro_time_features.items():
-                features[f'gyro_mag_{key}'] = value
-
-        # 추가 특성들
-        # Jerk (가속도 변화율)
-        if all(col in window_data.columns for col in acc_cols):
+            
+            # 회전 안정성 특성
+            features['gyro_mean'] = np.mean(gyro_magnitude)
+            features['gyro_std'] = np.std(gyro_magnitude)
+            features['gyro_rms'] = np.sqrt(np.mean(gyro_magnitude**2))
+            features['gyro_max'] = np.max(gyro_magnitude)
+            
+            # 각 축별 회전 안정성
             for i, axis in enumerate(['x', 'y', 'z']):
-                signal = window_data[f'acc_{axis}'].values
-                jerk = np.diff(signal)
-                jerk_features = self.extract_time_domain_features(jerk)
-                for key, value in jerk_features.items():
-                    features[f'jerk_{axis}_{key}'] = value
+                signal = gyro_data[:, i]
+                features[f'gyro_{axis}_std'] = np.std(signal)
 
-        # 전체 활동 강도
-        if 'acc_mag_rms' in features and 'gyro_mag_rms' in features:
-            features['activity_intensity'] = features['acc_mag_rms'] + features['gyro_mag_rms']
-        elif 'acc_mag_rms' in features:
-            features['activity_intensity'] = features['acc_mag_rms']
+        # Jerk 핵심 특성 (충격 저항성)
+        if all(col in window_data.columns for col in acc_cols):
+            jerk_magnitude = np.sqrt(np.sum(np.diff(acc_data, axis=0)**2, axis=1))
+            features['jerk_mean'] = np.mean(jerk_magnitude)
+            features['jerk_std'] = np.std(jerk_magnitude)
+            features['jerk_max'] = np.max(jerk_magnitude)
+
+        # 종합 활동 강도 및 안정성 지표
+        if 'acc_rms' in features and 'gyro_rms' in features:
+            features['activity_intensity'] = features['acc_rms'] + features['gyro_rms']
+            features['stability_index'] = 1.0 / (1.0 + features['acc_std'] + features['gyro_std'])
+        elif 'acc_rms' in features:
+            features['activity_intensity'] = features['acc_rms']
+            features['stability_index'] = 1.0 / (1.0 + features['acc_std'])
 
         return features
 
