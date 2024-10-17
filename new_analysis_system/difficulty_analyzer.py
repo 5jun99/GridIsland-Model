@@ -9,70 +9,62 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Tuple
 
 class DifficultyAnalyzer:
-    """클러스터 기반 난이도 분석기"""
+    """클러스터 기반 난이도 분석기 (휠체어 기준)"""
 
     def __init__(self):
-        # 난이도 평가 기준 정의
+        # 난이도 평가 기준 (휠체어 접근성 기반) - 새로운 특성 이름에 맞게 업데이트
         self.difficulty_criteria = {
-            'movement_intensity': {
-                'weight': 0.3,
-                'description': '전체적인 움직임 강도',
-                'features': ['acc_mag_rms_mean', 'gyro_mag_rms_mean', 'activity_intensity_mean']
-            },
-            'instability': {
-                'weight': 0.25,
-                'description': '움직임 불안정성 (흔들림)',
-                'features': ['acc_mag_std_mean', 'acc_mag_var_mean', 'gyro_mag_std_mean']
-            },
-            'sudden_changes': {
-                'weight': 0.2,
-                'description': '급격한 변화 (충격, 진동)',
-                'features': ['acc_mag_mean_diff_mean', 'jerk_x_rms_mean', 'jerk_y_rms_mean', 'jerk_z_rms_mean']
-            },
-            'frequency_patterns': {
-                'weight': 0.15,
-                'description': '고주파 진동 패턴',
-                'features': ['acc_mag_high_freq_energy_mean', 'acc_mag_spectral_centroid_mean']
-            },
-            'range_variability': {
-                'weight': 0.1,
-                'description': '움직임 범위 변동성',
-                'features': ['acc_mag_range_mean', 'acc_mag_iqr_mean']
-            }
-        }
-
-        # 휠체어 접근성 평가 기준 (개선된 버전)
-        self.wheelchair_criteria = {
             'smoothness': {
                 'weight': 0.35,
                 'description': '경로 평활성 (휠체어 주행 편의성)',
-                'good_threshold': 'low',  # 낮을수록 좋음
-                'features': ['acc_mag_std_mean', 'acc_mag_mean_diff_mean', 'acc_mag_var_mean']
+                'good_threshold': 'low',  # 낮을수록 쉬움
+                'features': ['acc_std_mean', 'acc_mean_diff_mean', 'acc_x_std_mean', 'acc_y_std_mean', 'acc_z_std_mean']
             },
             'stability': {
                 'weight': 0.25,
                 'description': '회전 안정성 (휠체어 균형 유지)',
                 'good_threshold': 'low',
-                'features': ['gyro_mag_rms_mean', 'gyro_mag_std_mean']
+                'features': ['gyro_rms_mean', 'gyro_std_mean', 'gyro_x_std_mean', 'gyro_y_std_mean', 'gyro_z_std_mean']
             },
             'shock_resistance': {
                 'weight': 0.25,
                 'description': '충격 저항성 (장애물 및 단차 대응)',
                 'good_threshold': 'low',
-                'features': ['jerk_x_rms_mean', 'jerk_y_rms_mean', 'jerk_z_rms_mean']
+                'features': ['jerk_mean_mean', 'jerk_max_mean', 'acc_max_mean']
             },
             'comfort': {
                 'weight': 0.15,
                 'description': '승차감 (전체적인 편안함)',
                 'good_threshold': 'low',
-                'features': ['acc_mag_rms_mean', 'acc_mag_range_mean']
+                'features': ['acc_rms_mean', 'acc_range_mean', 'activity_intensity_mean']
             }
         }
 
-    def load_cluster_data(self, cluster_characteristics_path: str) -> pd.DataFrame:
-        """클러스터 특성 데이터 로드"""
-        print(f"📊 클러스터 특성 데이터 로드: {cluster_characteristics_path}")
-        self.cluster_data = pd.read_csv(cluster_characteristics_path)
+    def load_cluster_data(self, clustered_features_path: str = "results/clustered_features.csv") -> pd.DataFrame:
+        """클러스터 특성 데이터 로드 및 집계"""
+        print(f"📊 클러스터 특성 데이터 로드: {clustered_features_path}")
+
+        # clustered_features.csv 로드
+        full_data = pd.read_csv(clustered_features_path)
+
+        # 클러스터별 평균 계산
+        cluster_groups = full_data.groupby('cluster')
+        cluster_means = cluster_groups.mean()
+
+        # count와 percentage 추가
+        cluster_counts = cluster_groups.size()
+        total_count = len(full_data)
+
+        self.cluster_data = cluster_means.copy()
+        self.cluster_data['cluster'] = cluster_means.index
+        self.cluster_data['count'] = cluster_counts.values
+        self.cluster_data['percentage'] = (cluster_counts.values / total_count) * 100
+
+        # 특성명에 _mean 추가 (기존 코드 호환성)
+        for col in cluster_means.columns:
+            if col not in ['cluster', 'count', 'percentage', 'window_id', 'start_idx', 'end_idx', 'window_size']:
+                self.cluster_data[f'{col}_mean'] = self.cluster_data[col]
+
         print(f"✅ 로드 완료: {len(self.cluster_data)}개 클러스터")
         return self.cluster_data
 
@@ -93,90 +85,73 @@ class DifficultyAnalyzer:
 
         return normalized_df
 
+    def calculate_difficulty_score_simple(self, cluster_row: pd.Series) -> Dict:
+        """간단한 임계값 기반 난이도 계산"""
+        # 핵심 특성값 추출
+        acc_std = cluster_row.get('acc_std_mean', 0)
+        gyro_std = cluster_row.get('gyro_std_mean', 0) 
+        jerk_max = cluster_row.get('jerk_max_mean', 0)
+        acc_range = cluster_row.get('acc_range_mean', 0)
+        
+        # 임계값 기반 점수 계산
+        # 1. Smoothness (가속도 안정성)
+        if acc_std <= 2.0:
+            smoothness = 0.0
+        elif acc_std <= 5.0:
+            smoothness = 0.3
+        elif acc_std <= 8.0:
+            smoothness = 0.7
+        else:
+            smoothness = 1.0
+        
+        # 2. Stability (회전 안정성)
+        if gyro_std <= 0.3:
+            stability = 0.0
+        elif gyro_std <= 0.7:
+            stability = 0.3
+        elif gyro_std <= 1.2:
+            stability = 0.7
+        else:
+            stability = 1.0
+        
+        # 3. Shock resistance (충격 저항성)
+        if jerk_max <= 20.0:
+            shock = 0.0
+        elif jerk_max <= 35.0:
+            shock = 0.3
+        elif jerk_max <= 50.0:
+            shock = 0.7
+        else:
+            shock = 1.0
+        
+        # 4. Comfort (편안함)
+        if acc_range <= 15.0:
+            comfort = 0.0
+        elif acc_range <= 30.0:
+            comfort = 0.3
+        elif acc_range <= 45.0:
+            comfort = 0.7
+        else:
+            comfort = 1.0
+        
+        # 가중평균
+        difficulty = (smoothness * 0.35 + stability * 0.25 + shock * 0.25 + comfort * 0.15)
+        
+        return {
+            'difficulty_score': difficulty,
+            'criterion_scores': {
+                'smoothness': {'raw_score': smoothness, 'weighted_score': smoothness * 0.35},
+                'stability': {'raw_score': stability, 'weighted_score': stability * 0.25},
+                'shock_resistance': {'raw_score': shock, 'weighted_score': shock * 0.25},
+                'comfort': {'raw_score': comfort, 'weighted_score': comfort * 0.15}
+            }
+        }
+
     def calculate_difficulty_score(self, cluster_row: pd.Series) -> Dict:
-        """클러스터별 난이도 점수 계산"""
-        scores = {}
-        total_score = 0.0
+        """클러스터별 난이도 점수 계산 (간소화된 버전)"""
+        # 간단한 버전 사용
+        return self.calculate_difficulty_score_simple(cluster_row)
 
-        for criterion, config in self.difficulty_criteria.items():
-            criterion_score = 0.0
-            available_features = 0
-
-            for feature in config['features']:
-                if feature in cluster_row.index:
-                    # 정규화된 값 사용 (높을수록 어려움)
-                    normalized_feature = f'{feature}_norm'
-                    if normalized_feature in cluster_row.index:
-                        criterion_score += cluster_row[normalized_feature]
-                        available_features += 1
-
-            if available_features > 0:
-                criterion_score = criterion_score / available_features
-                weighted_score = criterion_score * config['weight']
-                scores[criterion] = {
-                    'raw_score': criterion_score,
-                    'weighted_score': weighted_score,
-                    'weight': config['weight'],
-                    'description': config['description']
-                }
-                total_score += weighted_score
-            else:
-                scores[criterion] = {
-                    'raw_score': 0.0,
-                    'weighted_score': 0.0,
-                    'weight': config['weight'],
-                    'description': config['description']
-                }
-
-        return {
-            'total_difficulty': total_score,
-            'criterion_scores': scores
-        }
-
-    def calculate_wheelchair_accessibility(self, cluster_row: pd.Series) -> Dict:
-        """휠체어 접근성 점수 계산"""
-        scores = {}
-        total_score = 0.0
-
-        for criterion, config in self.wheelchair_criteria.items():
-            criterion_score = 0.0
-            available_features = 0
-
-            for feature in config['features']:
-                if feature in cluster_row.index:
-                    normalized_feature = f'{feature}_norm'
-                    if normalized_feature in cluster_row.index:
-                        # 휠체어 접근성은 낮을수록 좋으므로 1에서 빼기
-                        if config['good_threshold'] == 'low':
-                            accessibility_score = 1.0 - cluster_row[normalized_feature]
-                        else:
-                            accessibility_score = cluster_row[normalized_feature]
-
-                        criterion_score += accessibility_score
-                        available_features += 1
-
-            if available_features > 0:
-                criterion_score = criterion_score / available_features
-                weighted_score = criterion_score * config['weight']
-                scores[criterion] = {
-                    'raw_score': criterion_score,
-                    'weighted_score': weighted_score,
-                    'weight': config['weight'],
-                    'description': config['description']
-                }
-                total_score += weighted_score
-            else:
-                scores[criterion] = {
-                    'raw_score': 0.0,
-                    'weighted_score': 0.0,
-                    'weight': config['weight'],
-                    'description': config['description']
-                }
-
-        return {
-            'total_accessibility': total_score,
-            'criterion_scores': scores
-        }
 
     def classify_difficulty_level(self, difficulty_score: float) -> Dict:
         """난이도 점수를 레벨로 분류"""
@@ -191,31 +166,17 @@ class DifficultyAnalyzer:
         else:
             return {'level': 4, 'name': '매우 어려움', 'color': 'red', 'description': '계단/극한, 매우 위험'}
 
-    def classify_wheelchair_accessibility(self, accessibility_score: float) -> Dict:
-        """휠체어 접근성 점수를 등급으로 분류"""
-        if accessibility_score >= 0.8:
-            return {'grade': 'A', 'name': '우수', 'color': 'green', 'description': '휠체어 이용 매우 적합'}
-        elif accessibility_score >= 0.6:
-            return {'grade': 'B', 'name': '양호', 'color': 'lightgreen', 'description': '휠체어 이용 적합'}
-        elif accessibility_score >= 0.4:
-            return {'grade': 'C', 'name': '보통', 'color': 'yellow', 'description': '휠체어 이용 가능 (주의)'}
-        elif accessibility_score >= 0.2:
-            return {'grade': 'D', 'name': '어려움', 'color': 'orange', 'description': '휠체어 이용 어려움'}
-        else:
-            return {'grade': 'F', 'name': '부적합', 'color': 'red', 'description': '휠체어 이용 불가'}
 
     def analyze_all_clusters(self) -> pd.DataFrame:
         """모든 클러스터 분석"""
         if not hasattr(self, 'cluster_data'):
             raise ValueError("클러스터 데이터를 먼저 로드하세요")
 
-        print("🔍 클러스터별 난이도 및 접근성 분석 시작")
+        print("🔍 클러스터별 난이도 분석 시작")
 
         # 특성 정규화
         all_features = []
         for config in self.difficulty_criteria.values():
-            all_features.extend(config['features'])
-        for config in self.wheelchair_criteria.values():
             all_features.extend(config['features'])
 
         unique_features = list(set(all_features))
@@ -232,35 +193,23 @@ class DifficultyAnalyzer:
 
             # 난이도 분석
             difficulty_result = self.calculate_difficulty_score(row)
-            difficulty_level = self.classify_difficulty_level(difficulty_result['total_difficulty'])
+            difficulty_level = self.classify_difficulty_level(difficulty_result['difficulty_score'])
 
-            # 휠체어 접근성 분석
-            accessibility_result = self.calculate_wheelchair_accessibility(row)
-            accessibility_grade = self.classify_wheelchair_accessibility(accessibility_result['total_accessibility'])
-
-            print(f"  난이도: {difficulty_result['total_difficulty']:.3f} ({difficulty_level['name']})")
-            print(f"  휠체어 접근성: {accessibility_result['total_accessibility']:.3f} ({accessibility_grade['name']})")
+            print(f"  난이도: {difficulty_result['difficulty_score']:.3f} ({difficulty_level['name']})")
 
             result = {
                 'cluster': cluster_id,
                 'count': cluster_count,
                 'percentage': cluster_percentage,
-                'difficulty_score': difficulty_result['total_difficulty'],
+                'difficulty_score': difficulty_result['difficulty_score'],
                 'difficulty_level': difficulty_level['level'],
                 'difficulty_name': difficulty_level['name'],
-                'difficulty_description': difficulty_level['description'],
-                'wheelchair_score': accessibility_result['total_accessibility'],
-                'wheelchair_grade': accessibility_grade['grade'],
-                'wheelchair_name': accessibility_grade['name'],
-                'wheelchair_description': accessibility_grade['description']
+                'difficulty_description': difficulty_level['description']
             }
 
             # 세부 점수 추가
             for criterion, score_info in difficulty_result['criterion_scores'].items():
                 result[f'difficulty_{criterion}'] = score_info['weighted_score']
-
-            for criterion, score_info in accessibility_result['criterion_scores'].items():
-                result[f'wheelchair_{criterion}'] = score_info['weighted_score']
 
             results.append(result)
 
@@ -281,15 +230,21 @@ class DifficultyAnalyzer:
         ax1.set_xlabel('클러스터')
         ax1.set_ylabel('난이도 점수 (0-1)')
 
-        # 2. 클러스터별 휠체어 접근성 비교
+        # 2. 클러스터별 세부 기준 점수
         ax2 = axes[0, 1]
-        grade_colors = {'A': 'green', 'B': 'lightgreen', 'C': 'yellow', 'D': 'orange', 'F': 'red'}
-        bars2 = ax2.bar(results_df['cluster'], results_df['wheelchair_score'])
-        for i, (bar, grade) in enumerate(zip(bars2, results_df['wheelchair_grade'])):
-            bar.set_color(grade_colors.get(grade, 'gray'))
-        ax2.set_title('클러스터별 휠체어 접근성')
+        criteria = ['smoothness', 'stability', 'shock_resistance', 'comfort']
+        bottom = np.zeros(len(results_df))
+        
+        for criterion in criteria:
+            if f'difficulty_{criterion}' in results_df.columns:
+                bars = ax2.bar(results_df['cluster'], results_df[f'difficulty_{criterion}'], 
+                              bottom=bottom, label=criterion)
+                bottom += results_df[f'difficulty_{criterion}']
+        
+        ax2.set_title('클러스터별 세부 기준 점수')
         ax2.set_xlabel('클러스터')
-        ax2.set_ylabel('접근성 점수 (0-1)')
+        ax2.set_ylabel('점수')
+        ax2.legend()
 
         # 3. 클러스터 분포
         ax3 = axes[1, 0]
@@ -297,20 +252,22 @@ class DifficultyAnalyzer:
                autopct='%1.1f%%', startangle=90)
         ax3.set_title('클러스터 분포')
 
-        # 4. 난이도 vs 접근성 산점도
+        # 4. 난이도 레벨 분포
         ax4 = axes[1, 1]
-        scatter = ax4.scatter(results_df['difficulty_score'], results_df['wheelchair_score'],
-                            s=results_df['percentage']*10, alpha=0.7, c=results_df['cluster'],
-                            cmap='tab10')
-        ax4.set_xlabel('난이도 점수')
-        ax4.set_ylabel('휠체어 접근성 점수')
-        ax4.set_title('난이도 vs 접근성 (크기=분포비율)')
-
-        # 클러스터 번호 표시
-        for idx, row in results_df.iterrows():
-            ax4.annotate(f'C{row.cluster}',
-                        (row.difficulty_score, row.wheelchair_score),
-                        xytext=(5, 5), textcoords='offset points')
+        level_counts = results_df['difficulty_level'].value_counts().sort_index()
+        level_names = ['매우 쉬움', '쉬움', '보통', '어려움', '매우 어려움']
+        level_colors = ['green', 'lightgreen', 'yellow', 'orange', 'red']
+        
+        bars = ax4.bar(range(len(level_counts)), level_counts.values)
+        for i, bar in enumerate(bars):
+            if i < len(level_colors):
+                bar.set_color(level_colors[i])
+        
+        ax4.set_xlabel('난이도 레벨')
+        ax4.set_ylabel('클러스터 수')
+        ax4.set_title('난이도 레벨별 클러스터 분포')
+        ax4.set_xticks(range(len(level_counts)))
+        ax4.set_xticklabels([level_names[i] for i in level_counts.index])
 
         plt.tight_layout()
 
@@ -323,7 +280,7 @@ class DifficultyAnalyzer:
     def generate_report(self, results_df: pd.DataFrame) -> str:
         """분석 결과 보고서 생성"""
         report = []
-        report.append("🎯 클러스터별 난이도 및 휠체어 접근성 분석 보고서")
+        report.append("🎯 클러스터별 난이도 분석 보고서")
         report.append("=" * 60)
 
         for idx, row in results_df.iterrows():
@@ -331,50 +288,48 @@ class DifficultyAnalyzer:
             report.append("-" * 40)
             report.append(f"🔥 난이도: {row.difficulty_score:.3f} - {row.difficulty_name}")
             report.append(f"   {row.difficulty_description}")
-            report.append(f"♿ 휠체어 접근성: {row.wheelchair_score:.3f} - {row.wheelchair_grade}등급 ({row.wheelchair_name})")
-            report.append(f"   {row.wheelchair_description}")
 
-            # 권장사항
-            if row.wheelchair_score >= 0.6:
-                report.append("✅ 권장: 휠체어 이용 적합한 경로")
-            elif row.wheelchair_score >= 0.4:
-                report.append("⚠️  주의: 휠체어 이용 시 조심 필요")
+            # 권장사항 (난이도 기준)
+            if row.difficulty_score <= 0.4:
+                report.append("✅ 권장: 이동하기 쉬운 경로")
+            elif row.difficulty_score <= 0.6:
+                report.append("⚠️  주의: 이동 시 조심 필요")
             else:
-                report.append("❌ 비권장: 휠체어 이용 피하는 것이 좋음")
+                report.append("❌ 비권장: 이동이 어려운 경로")
 
         # 종합 요약
         report.append(f"\n📋 종합 요약")
         report.append("-" * 40)
 
-        best_cluster = results_df.loc[results_df['wheelchair_score'].idxmax()]
-        worst_cluster = results_df.loc[results_df['wheelchair_score'].idxmin()]
+        easiest_cluster = results_df.loc[results_df['difficulty_score'].idxmin()]
+        hardest_cluster = results_df.loc[results_df['difficulty_score'].idxmax()]
 
-        report.append(f"🏆 가장 휠체어 친화적: 클러스터 {best_cluster.cluster} (접근성 {best_cluster.wheelchair_score:.3f})")
-        report.append(f"⚠️  가장 주의 필요: 클러스터 {worst_cluster.cluster} (접근성 {worst_cluster.wheelchair_score:.3f})")
+        report.append(f"🏆 가장 쉬운 경로: 클러스터 {easiest_cluster.cluster} (난이도 {easiest_cluster.difficulty_score:.3f})")
+        report.append(f"⚠️  가장 어려운 경로: 클러스터 {hardest_cluster.cluster} (난이도 {hardest_cluster.difficulty_score:.3f})")
 
         # 전체 경로 평가
-        weighted_accessibility = (results_df['wheelchair_score'] * results_df['percentage'] / 100).sum()
-        report.append(f"📊 전체 경로 휠체어 접근성: {weighted_accessibility:.3f}")
+        weighted_difficulty = (results_df['difficulty_score'] * results_df['percentage'] / 100).sum()
+        report.append(f"📊 전체 경로 평균 난이도: {weighted_difficulty:.3f}")
 
-        if weighted_accessibility >= 0.6:
-            report.append("✅ 전체적으로 휠체어 이용에 적합한 경로입니다")
-        elif weighted_accessibility >= 0.4:
-            report.append("⚠️  전체적으로 휠체어 이용 시 주의가 필요한 경로입니다")
+        if weighted_difficulty <= 0.4:
+            report.append("✅ 전체적으로 이동하기 쉬운 경로입니다")
+        elif weighted_difficulty <= 0.6:
+            report.append("⚠️  전체적으로 이동 시 주의가 필요한 경로입니다")
         else:
-            report.append("❌ 전체적으로 휠체어 이용이 어려운 경로입니다")
+            report.append("❌ 전체적으로 이동이 어려운 경로입니다")
 
         return "\n".join(report)
 
 def main():
     """메인 실행"""
-    print("🎯 클러스터 난이도 및 휠체어 접근성 분석")
+    print("🎯 클러스터 기반 난이도 분석")
     print("=" * 60)
 
     # 분석기 생성
     analyzer = DifficultyAnalyzer()
 
     # 클러스터 데이터 로드
-    cluster_data = analyzer.load_cluster_data("results/cluster_characteristics.csv")
+    cluster_data = analyzer.load_cluster_data("results/clustered_features.csv")
 
     # 전체 분석 수행
     results_df = analyzer.analyze_all_clusters()
