@@ -210,40 +210,6 @@ class ClusteringAnalyzer:
 
         plt.show()
 
-    def analyze_cluster_characteristics(self, labels: np.ndarray) -> pd.DataFrame:
-        """클러스터별 특성 분석"""
-        if self.features_df is None:
-            raise ValueError("특성 데이터를 먼저 로드하세요")
-
-        # 클러스터 라벨 추가
-        analysis_df = self.features_df.copy()
-        analysis_df['cluster'] = labels
-
-        # 숫자형 컬럼만 선택
-        numeric_cols = analysis_df.select_dtypes(include=[np.number]).columns
-        exclude_cols = ['window_id', 'start_idx', 'end_idx', 'window_size', 'cluster']
-        feature_cols = [col for col in numeric_cols if col not in exclude_cols]
-
-        # 클러스터별 통계
-        cluster_stats = []
-
-        for cluster in sorted(analysis_df['cluster'].unique()):
-            cluster_data = analysis_df[analysis_df['cluster'] == cluster]
-            stats = {
-                'cluster': cluster,
-                'count': len(cluster_data),
-                'percentage': len(cluster_data) / len(analysis_df) * 100
-            }
-
-            # 주요 특성들의 평균값
-            for col in feature_cols[:20]:  # 상위 20개 특성
-                stats[f'{col}_mean'] = cluster_data[col].mean()
-
-            cluster_stats.append(stats)
-
-        cluster_stats_df = pd.DataFrame(cluster_stats)
-        return cluster_stats_df
-
 def main():
     """메인 실행 함수"""
     print("🎯 클러스터링 분석 시작")
@@ -270,9 +236,6 @@ def main():
     # 결과 시각화
     analyzer.visualize_clusters(labels, save_path="results/clustering_visualization.png")
 
-    # 클러스터 특성 분석
-    cluster_characteristics = analyzer.analyze_cluster_characteristics(labels)
-
     # 결과 저장
     import os
     os.makedirs("results", exist_ok=True)
@@ -282,8 +245,10 @@ def main():
     result_df['cluster'] = labels
     result_df.to_csv("results/clustered_features.csv", index=False)
 
-    # 클러스터 특성 저장
-    cluster_characteristics.to_csv("results/cluster_characteristics.csv", index=False)
+    # 클러스터별 특성 통계 생성
+    cluster_stats = result_df.groupby('cluster').agg(['mean', 'std', 'min', 'max'])
+    cluster_stats.to_csv("results/cluster_characteristics.csv")
+    print(f"✅ 클러스터 특성 통계 저장: results/cluster_characteristics.csv")
 
     print(f"\n✅ 분석 완료!")
     print(f"📊 결과 파일:")
