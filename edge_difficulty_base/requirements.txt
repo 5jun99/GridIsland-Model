@@ -1,0 +1,22 @@
+# 엣지 기반 난이도 분석 시스템 요구사항
+
+# 데이터 처리
+pandas>=1.5.0
+numpy>=1.21.0
+
+# 머신러닝
+scikit-learn>=1.1.0
+
+# 시각화
+matplotlib>=3.5.0
+folium>=0.14.0
+
+# 데이터베이스
+mysql-connector-python>=8.0.0
+
+# 유틸리티
+typing_extensions>=4.0.0
+
+# 선택사항 (더 나은 성능을 위해)
+# seaborn>=0.11.0
+# plotly>=5.0.0
