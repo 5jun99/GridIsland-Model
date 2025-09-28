@@ -41,31 +41,31 @@ class DifficultyAnalyzer:
             }
         }
 
-        # 휠체어 접근성 평가 기준
+        # 휠체어 접근성 평가 기준 (개선된 버전)
         self.wheelchair_criteria = {
             'smoothness': {
-                'weight': 0.4,
-                'description': '경로 평활성',
+                'weight': 0.35,
+                'description': '경로 평활성 (휠체어 주행 편의성)',
                 'good_threshold': 'low',  # 낮을수록 좋음
-                'features': ['acc_mag_std_mean', 'acc_mag_mean_diff_mean']
+                'features': ['acc_mag_std_mean', 'acc_mag_mean_diff_mean', 'acc_mag_var_mean']
             },
             'stability': {
-                'weight': 0.3,
-                'description': '안정성',
+                'weight': 0.25,
+                'description': '회전 안정성 (휠체어 균형 유지)',
                 'good_threshold': 'low',
                 'features': ['gyro_mag_rms_mean', 'gyro_mag_std_mean']
             },
             'shock_resistance': {
-                'weight': 0.2,
-                'description': '충격 저항성',
+                'weight': 0.25,
+                'description': '충격 저항성 (장애물 및 단차 대응)',
                 'good_threshold': 'low',
                 'features': ['jerk_x_rms_mean', 'jerk_y_rms_mean', 'jerk_z_rms_mean']
             },
-            'overall_intensity': {
-                'weight': 0.1,
-                'description': '전체 강도',
+            'comfort': {
+                'weight': 0.15,
+                'description': '승차감 (전체적인 편안함)',
                 'good_threshold': 'low',
-                'features': ['acc_mag_rms_mean']
+                'features': ['acc_mag_rms_mean', 'acc_mag_range_mean']
             }
         }
 
