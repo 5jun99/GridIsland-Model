@@ -1,4 +1,0 @@
-cluster,count,percentage,difficulty_score,difficulty_level,difficulty_name,difficulty_description,wheelchair_score,wheelchair_grade,wheelchair_name,wheelchair_description,difficulty_movement_intensity,difficulty_instability,difficulty_sudden_changes,difficulty_frequency_patterns,difficulty_range_variability,wheelchair_smoothness,wheelchair_stability,wheelchair_shock_resistance,wheelchair_overall_intensity
-0.0,7.0,4.487179487179487,0.0,0,매우 쉬움,"평지, 매우 안전",0.5,C,보통,휠체어 이용 가능 (주의),0.0,0.0,0.0,0.0,0.0,0.4,0.0,0.0,0.1
-1.0,94.0,60.256410256410255,0.5752999046164411,2,보통,"중간 경사, 주의 필요",0.21278936104478874,D,어려움,휠체어 이용 어려움,0.12519949951846318,0.1173058317254118,0.1376554833416098,0.14608283994707927,0.04905625008387704,0.15452252755094312,0.0,0.0,0.05826683349384561
-2.0,55.0,35.256410256410255,1.0,4,매우 어려움,"계단/극한, 매우 위험",0.0,F,부적합,휠체어 이용 불가,0.3,0.25,0.2,0.15,0.1,0.0,0.0,0.0,0.0

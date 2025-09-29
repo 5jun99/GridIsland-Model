@@ -23,7 +23,7 @@ def main():
     os.makedirs("results", exist_ok=True)
 
     # 1단계: 센서 데이터 처리
-    print("\n📊 1단계: 고급 센서 데이터 처리")
+    print("\n📊 1단계: 센서 데이터 처리")
     print("-" * 45)
 
     data_dir = "data/test 2025-09-22 18-30-21"
@@ -60,8 +60,8 @@ def main():
     features_path = "results/extracted_features.csv"
     features_df.to_csv(features_path, index=False)
 
-    # 3단계: 지능형 클러스터링
-    print("\n🎯 3단계: 적응형 클러스터링 분석")
+    # 3단계: 클러스터링
+    print("\n🎯 3단계: 클러스터링 분석")
     print("-" * 40)
 
     analyzer = ClusteringAnalyzer()
@@ -87,117 +87,23 @@ def main():
     print(f"🏆 최적 방법론: {method.upper()}, K={optimal_k} (품질: {best_score:.3f})")
 
     labels = analyzer.perform_clustering(n_clusters=optimal_k, method=method)
-    cluster_characteristics = analyzer.analyze_cluster_characteristics(labels)
 
     # 결과 저장
     result_df = features_df.copy()
     result_df['cluster'] = labels
     result_df.to_csv("results/clustered_features.csv", index=False)
-    cluster_characteristics.to_csv("results/cluster_characteristics.csv", index=False)
-
-    # 4단계: 종합 평가 시스템
-    print("\n🏥 4단계: 종합 난이도 및 접근성 평가")
-    print("-" * 45)
-
-    difficulty_analyzer = DifficultyAnalyzer()
-    difficulty_analyzer.load_cluster_data("results/cluster_characteristics.csv")
-    difficulty_results = difficulty_analyzer.analyze_all_clusters()
-
-    # 5단계: 지능형 보고서 생성
-    print("\n📋 5단계: 지능형 분석 보고서 생성")
-    print("-" * 40)
-
-    # 전체 경로 위험도 평가
-    weighted_accessibility = (difficulty_results['wheelchair_score'] * difficulty_results['percentage'] / 100).sum()
-    weighted_difficulty = (difficulty_results['difficulty_score'] * difficulty_results['percentage'] / 100).sum()
-
-    # 위험 구간 식별
-    high_risk_clusters = difficulty_results[difficulty_results['wheelchair_score'] < 0.4]
-    safe_clusters = difficulty_results[difficulty_results['wheelchair_score'] >= 0.6]
-
-    # 종합 등급 결정
-    if weighted_accessibility >= 0.7:
-        overall_grade = "A (우수)"
-        recommendation = "휠체어 이용에 매우 적합한 경로입니다"
-        emoji = "✅"
-    elif weighted_accessibility >= 0.5:
-        overall_grade = "B (양호)"
-        recommendation = "휠체어 이용에 적합한 경로입니다"
-        emoji = "✅"
-    elif weighted_accessibility >= 0.3:
-        overall_grade = "C (보통)"
-        recommendation = "휠체어 이용 시 주의가 필요합니다"
-        emoji = "⚠️"
-    elif weighted_accessibility >= 0.15:
-        overall_grade = "D (주의)"
-        recommendation = "휠체어 이용이 어렵습니다. 대안 경로를 고려하세요"
-        emoji = "❌"
-    else:
-        overall_grade = "F (위험)"
-        recommendation = "휠체어 이용이 매우 위험합니다. 다른 경로를 이용하세요"
-        emoji = "🚫"
-
-    # 상세 보고서 생성
-    detailed_report = difficulty_analyzer.generate_report(difficulty_results)
-
-    # 결과 저장
-    difficulty_results.to_csv("results/difficulty_analysis.csv", index=False)
-    with open("results/comprehensive_report.txt", "w", encoding="utf-8") as f:
-        f.write(detailed_report)
 
     # 시각화
     try:
         import matplotlib
         matplotlib.use('Agg')
         analyzer.visualize_clusters(labels, save_path="results/clustering_visualization.png")
-        difficulty_analyzer.visualize_analysis(difficulty_results, save_path="results/accessibility_analysis.png")
     except Exception as e:
         print(f"⚠️  시각화 저장 실패: {e}")
 
     # 최종 요약 출력
-    print(f"\n🎉 Grid Island 완전 분석 완료!")
+    print(f"\n🎉 분석 완료!")
     print("=" * 60)
-
-    print(f"\n📊 경로 종합 평가:")
-    print(f"  {emoji} 종합 등급: {overall_grade}")
-    print(f"  📈 접근성 점수: {weighted_accessibility:.3f}/1.0")
-    print(f"  🔥 난이도 점수: {weighted_difficulty:.3f}/1.0")
-    print(f"  💡 권장사항: {recommendation}")
-
-    print(f"\n🎯 구간별 상세 분석:")
-    for idx, row in difficulty_results.iterrows():
-        risk_emoji = "✅" if row.wheelchair_score >= 0.6 else "⚠️" if row.wheelchair_score >= 0.4 else "❌"
-        print(f"  {risk_emoji} 클러스터 {row.cluster}: {row.wheelchair_grade}등급 ({row.percentage:.1f}%) - {row.wheelchair_name}")
-
-    if len(high_risk_clusters) > 0:
-        print(f"\n⚠️  주의 구간 ({len(high_risk_clusters)}개):")
-        total_risk_percentage = high_risk_clusters['percentage'].sum()
-        print(f"  전체 경로의 {total_risk_percentage:.1f}%가 위험 구간입니다")
-        for idx, row in high_risk_clusters.iterrows():
-            print(f"  - 클러스터 {row.cluster}: {row.wheelchair_description}")
-
-    if len(safe_clusters) > 0:
-        print(f"\n✅ 안전 구간 ({len(safe_clusters)}개):")
-        total_safe_percentage = safe_clusters['percentage'].sum()
-        print(f"  전체 경로의 {total_safe_percentage:.1f}%가 안전 구간입니다")
-
-    print(f"\n📁 생성된 결과 파일:")
-    result_files = [
-        "results/extracted_features.csv",
-        "results/clustered_features.csv",
-        "results/cluster_characteristics.csv",
-        "results/difficulty_analysis.csv",
-        "results/comprehensive_report.txt",
-        "results/clustering_visualization.png",
-        "results/accessibility_analysis.png"
-    ]
-
-    for file in result_files:
-        if os.path.exists(file):
-            file_size = os.path.getsize(file) / 1024  # KB
-            print(f"  ✅ {file} ({file_size:.1f} KB)")
-        else:
-            print(f"  ❌ {file}")
 
     return True
 
