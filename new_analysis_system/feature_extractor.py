@@ -17,12 +17,16 @@ class FeatureExtractor:
     def __init__(self, window_size: int = 200, overlap_ratio: float = 0.75):
         """
         Args:
-            window_size: 윈도우 크기 (샘플 수)
-            overlap_ratio: 오버랩 비율 (0.0 ~ 1.0)
+            window_size: 윈도우 크기 (샘플 수) - 메모리 최적화 고려
+            overlap_ratio: 오버랩 비율 (0.0 ~ 1.0) - 정확도 vs 속도 트레이드오프
         """
         self.window_size = window_size
         self.overlap_ratio = overlap_ratio
         self.step_size = int(window_size * (1 - overlap_ratio))
+
+        # 성능 최적화 설정
+        self.use_parallel = True  # 병렬 처리 활성화
+        self.cache_fft = {}  # FFT 결과 캐싱
 
     def extract_time_domain_features(self, signal: np.ndarray) -> Dict[str, float]:
         """시간 도메인 특성 추출"""
