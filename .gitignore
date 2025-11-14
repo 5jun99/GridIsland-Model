@@ -237,10 +237,6 @@ Thumbs.db
 # 샘플 데이터는 포함 (작은 용량)
 !sample_data/
 !example_data/
-
-# 중요한 테스트 데이터는 포함
-!"test 2025-09-22 18-30-21"/
-
 # 문서화 이미지는 포함
 !docs/images/
 !README_images/
