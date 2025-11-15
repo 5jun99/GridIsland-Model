@@ -319,6 +319,101 @@ class DifficultyAnalyzer:
             report.append("❌ 전체적으로 이동이 어려운 경로입니다")
 
         return "\n".join(report)
+    
+    def analyze_segments_difficulty(self, segments_data: List[Dict]) -> List[Dict]:
+        """세그먼트별 난이도 분석 (네비게이션용)"""
+        print("🎯 세그먼트별 난이도 분석 시작")
+        
+        analyzed_segments = []
+        
+        for segment in segments_data:
+            # 세그먼트 특성을 클러스터 형태로 변환
+            segment_features = pd.Series({
+                'acc_std_mean': segment.get('vibration_std', 0),
+                'gyro_std_mean': segment.get('rotation_std', 0),
+                'jerk_max_mean': segment.get('vibration_max', 0) * 2,  # 근사치
+                'acc_range_mean': segment.get('vibration_rms', 0) * 3,  # 근사치
+                'acc_rms_mean': segment.get('vibration_rms', 0),
+                'gyro_rms_mean': segment.get('rotation_mean', 0),
+                'activity_intensity_mean': segment.get('vibration_rms', 0) + segment.get('rotation_mean', 0)
+            })
+            
+            # 난이도 계산
+            difficulty_result = self.calculate_difficulty_score(segment_features)
+            difficulty_level = self.classify_difficulty_level(difficulty_result['difficulty_score'])
+            
+            # 세그먼트에 난이도 정보 추가
+            analyzed_segment = segment.copy()
+            analyzed_segment.update({
+                'difficulty_score': difficulty_result['difficulty_score'],
+                'difficulty_level': difficulty_level['level'],
+                'difficulty_name': difficulty_level['name'],
+                'difficulty_description': difficulty_level['description'],
+                'difficulty_color': difficulty_level['color']
+            })
+            
+            # 세부 점수도 추가
+            for criterion, score_info in difficulty_result['criterion_scores'].items():
+                analyzed_segment[f'difficulty_{criterion}'] = score_info['weighted_score']
+            
+            analyzed_segments.append(analyzed_segment)
+        
+        print(f"✅ {len(analyzed_segments)}개 세그먼트 난이도 분석 완료")
+        return analyzed_segments
+    
+    def get_navigation_recommendations(self, segments: List[Dict]) -> Dict:
+        """네비게이션 추천사항 생성"""
+        if not segments:
+            return {}
+        
+        # 전체 경로 분석
+        total_distance = sum(seg.get('distance_meters', 0) for seg in segments)
+        avg_difficulty = sum(seg.get('difficulty_score', 0) for seg in segments) / len(segments)
+        max_difficulty = max(seg.get('difficulty_score', 0) for seg in segments)
+        
+        # 어려운 구간 수
+        difficult_segments = [seg for seg in segments if seg.get('difficulty_score', 0) > 0.6]
+        
+        # 추천사항 생성
+        recommendations = {
+            'route_summary': {
+                'total_distance': total_distance,
+                'total_segments': len(segments),
+                'avg_difficulty': avg_difficulty,
+                'max_difficulty': max_difficulty,
+                'difficult_segments_count': len(difficult_segments)
+            },
+            'accessibility_assessment': '',
+            'warnings': [],
+            'recommendations': []
+        }
+        
+        # 접근성 평가
+        if avg_difficulty < 0.3:
+            recommendations['accessibility_assessment'] = "휠체어 이동에 매우 적합한 경로입니다."
+        elif avg_difficulty < 0.5:
+            recommendations['accessibility_assessment'] = "휠체어 이동이 가능한 경로입니다."
+        elif avg_difficulty < 0.7:
+            recommendations['accessibility_assessment'] = "휠체어 이동 시 주의가 필요한 경로입니다."
+        else:
+            recommendations['accessibility_assessment'] = "휠체어 이동이 어려운 경로입니다."
+        
+        # 경고사항
+        if len(difficult_segments) > len(segments) * 0.3:
+            recommendations['warnings'].append("경로의 30% 이상이 어려운 구간입니다.")
+        
+        if max_difficulty > 0.8:
+            recommendations['warnings'].append("매우 험난한 구간이 포함되어 있습니다.")
+        
+        # 추천사항
+        if avg_difficulty > 0.5:
+            recommendations['recommendations'].append("가능한 경우 대체 경로를 고려해보세요.")
+            recommendations['recommendations'].append("이동 시 충분한 시간을 확보하세요.")
+        
+        if len(difficult_segments) > 0:
+            recommendations['recommendations'].append("어려운 구간에서는 속도를 줄이고 신중하게 이동하세요.")
+        
+        return recommendations
 
 def main():
     """메인 실행"""
