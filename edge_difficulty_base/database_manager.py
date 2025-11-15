@@ -6,6 +6,8 @@
 import mysql.connector
 from mysql.connector import Error
 import json
+import math
+import pandas as pd
 from typing import Dict, List, Any, Optional
 import logging
 from datetime import datetime
@@ -241,6 +243,114 @@ class DatabaseManager:
         
         self.connection.commit()
         self.logger.info(f"✅ 세그먼트 저장 완료: {saved_count}개")
+        
+        return saved_count > 0
+    
+    def save_segments_with_navigation(self, edges: Dict[str, Dict]) -> bool:
+        """네비게이션 세그먼트 데이터 저장 (확장된 스키마 지원)"""
+        self.logger.info("🗺️ 네비게이션 세그먼트 저장 중...")
+        
+        # 기존 세그먼트 데이터 삭제
+        delete_query = "DELETE FROM segments"
+        self.execute_query(delete_query)
+        
+        # 네비게이션 필드가 있는지 확인
+        check_nav_fields = """
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'segments' 
+        AND COLUMN_NAME IN ('start_lat', 'navigation_instruction')
+        """
+        
+        cursor = self.connection.cursor()
+        cursor.execute(check_nav_fields, (self.database,))
+        nav_columns = [row[0] for row in cursor.fetchall()]
+        cursor.close()
+        
+        has_navigation_fields = 'start_lat' in nav_columns and 'navigation_instruction' in nav_columns
+        
+        if has_navigation_fields:
+            # 확장된 네비게이션 필드와 함께 저장
+            insert_query = """
+            INSERT INTO segments (
+                edge_id, segment_number, start_time, end_time, duration,
+                vibration_rms, vibration_std, vibration_max,
+                rotation_mean, rotation_std, rotation_max,
+                height_change, velocity_mean, velocity_std,
+                cluster_label, difficulty_score,
+                start_lat, start_lon, end_lat, end_lon,
+                distance_meters, bearing_degrees, turn_angle,
+                navigation_instruction, warning_message, estimated_time_sec,
+                accessibility_level, is_merged, original_segment_ids
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+        else:
+            # 기본 필드만으로 저장
+            insert_query = """
+            INSERT INTO segments (
+                edge_id, segment_number, start_time, end_time, duration,
+                vibration_rms, vibration_std, vibration_max,
+                rotation_mean, rotation_std, rotation_max,
+                height_change, velocity_mean, velocity_std,
+                cluster_label, difficulty_score
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            self.logger.warning("⚠️ 네비게이션 필드가 없는 기존 스키마 사용")
+        
+        saved_count = 0
+        for edge_id, edge_info in edges.items():
+            # 네비게이션 세그먼트가 있으면 우선 사용, 없으면 일반 세그먼트 사용
+            segments_to_save = edge_info.get('navigation_segments', edge_info.get('segments', []))
+            
+            for segment in segments_to_save:
+                duration = segment['end_time'] - segment['start_time']
+                
+                # 기본 파라미터
+                base_params = (
+                    edge_id,
+                    segment.get('segment_number', segment.get('segment_id', 1)),
+                    float(segment['start_time']),
+                    float(segment['end_time']),
+                    float(duration),
+                    float(segment.get('vibration_rms', 0)),
+                    float(segment.get('vibration_std', 0)),
+                    float(segment.get('vibration_max', 0)),
+                    float(segment.get('rotation_mean', 0)),
+                    float(segment.get('rotation_std', 0)),
+                    float(segment.get('rotation_max', 0)),
+                    float(segment.get('height_change', 0)),
+                    float(segment.get('velocity_mean', 1.0)),
+                    float(segment.get('velocity_std', 0.1)),
+                    segment.get('cluster_label', 0),
+                    float(segment.get('difficulty_score', 0.5))
+                )
+                
+                if has_navigation_fields:
+                    # 네비게이션 파라미터 추가
+                    nav_params = (
+                        float(segment.get('start_lat', 37.5665)),
+                        float(segment.get('start_lon', 126.9780)),
+                        float(segment.get('end_lat', 37.5665)),
+                        float(segment.get('end_lon', 126.9780)),
+                        float(segment.get('distance_meters', 10.0)),
+                        float(segment.get('bearing_degrees', 0.0)),
+                        float(segment.get('turn_angle', 0.0)),
+                        segment.get('navigation_instruction', '직진'),
+                        segment.get('warning_message'),
+                        float(segment.get('estimated_time_sec', duration)),
+                        segment.get('accessibility_level', '보통'),
+                        segment.get('is_merged', False),
+                        json.dumps(segment.get('original_segment_ids', [segment.get('segment_id', 1)]))
+                    )
+                    params = base_params + nav_params
+                else:
+                    params = base_params
+                
+                if self.execute_query(insert_query, params):
+                    saved_count += 1
+        
+        self.connection.commit()
+        self.logger.info(f"✅ {'네비게이션' if has_navigation_fields else '기본'} 세그먼트 저장 완료: {saved_count}개")
         return saved_count > 0
     
     def save_gps_tracks(self, edges: Dict[str, Dict]) -> bool:
@@ -334,9 +444,9 @@ class DatabaseManager:
             if not self.save_edges(analyzer.edges):
                 raise Exception("엣지 저장 실패")
             
-            # 4. 세그먼트 저장
-            if not self.save_segments(analyzer.edges):
-                raise Exception("세그먼트 저장 실패")
+            # 4. 세그먼트 저장 (네비게이션 정보 포함)
+            if not self.save_navigation_segments(analyzer.edges):
+                raise Exception("네비게이션 세그먼트 저장 실패")
             
             # 5. GPS 트랙 저장 (선택사항)
             # self.save_gps_tracks(analyzer.edges)
@@ -372,6 +482,333 @@ class DatabaseManager:
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
         
         return R * c
+    
+    def merge_similar_segments(self, segments_data: List[Dict]) -> List[Dict]:
+        """연속된 비슷한 난이도 구간을 병합"""
+        if not segments_data:
+            return []
+        
+        self.logger.info(f"🔄 세그먼트 병합 시작: {len(segments_data)}개 원본 세그먼트")
+        
+        merged_segments = []
+        current_segment = None
+        
+        # 세그먼트를 시간순으로 정렬
+        segments_data = sorted(segments_data, key=lambda x: x['start_time'])
+        
+        for segment in segments_data:
+            if current_segment is None:
+                current_segment = segment.copy()
+                current_segment['original_segment_ids'] = [segment.get('segment_id', segment['segment_number'])]
+                continue
+            
+            # 연속성 확인 (시간 간격이 10초 이내)
+            time_gap = abs(segment['start_time'] - current_segment['end_time'])
+            
+            # 난이도 차이 확인
+            diff_score = abs(segment['difficulty_score'] - current_segment['difficulty_score'])
+            
+            # 같은 클러스터이고 난이도가 비슷하며 연속된 구간이면 병합
+            if (segment['cluster_label'] == current_segment['cluster_label'] and 
+                diff_score <= 0.15 and  # 난이도 차이 임계값
+                time_gap <= 10.0):  # 시간 간격 임계값
+                
+                # 세그먼트 병합
+                current_segment = self._merge_two_segments(current_segment, segment)
+                current_segment['original_segment_ids'].append(
+                    segment.get('segment_id', segment['segment_number'])
+                )
+            else:
+                # 현재 세그먼트를 저장하고 새 세그먼트 시작
+                current_segment['is_merged'] = len(current_segment['original_segment_ids']) > 1
+                merged_segments.append(current_segment)
+                
+                current_segment = segment.copy()
+                current_segment['original_segment_ids'] = [segment.get('segment_id', segment['segment_number'])]
+        
+        # 마지막 세그먼트 처리
+        if current_segment:
+            current_segment['is_merged'] = len(current_segment['original_segment_ids']) > 1
+            merged_segments.append(current_segment)
+        
+        self.logger.info(f"✅ 세그먼트 병합 완료: {len(merged_segments)}개 병합 세그먼트")
+        return merged_segments
+    
+    def _merge_two_segments(self, seg1: Dict, seg2: Dict) -> Dict:
+        """두 세그먼트를 병합"""
+        merged = seg1.copy()
+        
+        # 시간 범위 확장
+        merged['start_time'] = min(seg1['start_time'], seg2['start_time'])
+        merged['end_time'] = max(seg1['end_time'], seg2['end_time'])
+        merged['duration'] = merged['end_time'] - merged['start_time']
+        
+        # 평균값 계산
+        total_duration = seg1['duration'] + seg2['duration']
+        weight1 = seg1['duration'] / total_duration if total_duration > 0 else 0.5
+        weight2 = seg2['duration'] / total_duration if total_duration > 0 else 0.5
+        
+        # 가중평균으로 센서 값들 병합
+        sensor_fields = ['vibration_rms', 'vibration_std', 'vibration_max',
+                        'rotation_mean', 'rotation_std', 'rotation_max',
+                        'height_change', 'velocity_mean', 'velocity_std', 'difficulty_score']
+        
+        for field in sensor_fields:
+            if field in seg1 and field in seg2:
+                merged[field] = seg1[field] * weight1 + seg2[field] * weight2
+        
+        return merged
+    
+    def calculate_navigation_info(self, gps_data: pd.DataFrame, segment: Dict) -> Dict:
+        """GPS 데이터로부터 네비게이션 정보 계산"""
+        if gps_data is None or len(gps_data) < 2:
+            return {
+                'start_lat': None, 'start_lon': None,
+                'end_lat': None, 'end_lon': None,
+                'distance_meters': 0, 'bearing_degrees': 0,
+                'turn_angle': 0, 'estimated_time_sec': 0
+            }
+        
+        # 시간 범위에 해당하는 GPS 포인트 추출
+        start_time = segment['start_time']
+        end_time = segment['end_time']
+        
+        # time_s 컬럼을 사용하여 필터링
+        segment_gps = gps_data[
+            (gps_data['time_s'] >= start_time) & 
+            (gps_data['time_s'] <= end_time)
+        ].copy()
+        
+        if len(segment_gps) < 2:
+            # 전체 데이터에서 가장 가까운 시간의 포인트 사용
+            start_idx = (gps_data['time_s'] - start_time).abs().idxmin()
+            end_idx = (gps_data['time_s'] - end_time).abs().idxmin()
+            
+            if start_idx == end_idx and len(gps_data) > 1:
+                end_idx = start_idx + 1 if start_idx < len(gps_data) - 1 else start_idx - 1
+            
+            start_point = gps_data.loc[start_idx]
+            end_point = gps_data.loc[end_idx]
+        else:
+            start_point = segment_gps.iloc[0]
+            end_point = segment_gps.iloc[-1]
+        
+        # 거리 계산
+        distance = self._calculate_distance(
+            start_point['latitude'], start_point['longitude'],
+            end_point['latitude'], end_point['longitude']
+        )
+        
+        # 방향각 계산 (북쪽 기준)
+        bearing = self._calculate_bearing(
+            start_point['latitude'], start_point['longitude'],
+            end_point['latitude'], end_point['longitude']
+        )
+        
+        # 예상 시간 계산 (난이도 기반 속도 조정)
+        base_speed = 1.2  # 기본 속도 m/s
+        difficulty_penalty = 1 + segment.get('difficulty_score', 0) * 1.5
+        estimated_time = distance / (base_speed / difficulty_penalty) if distance > 0 else 0
+        
+        return {
+            'start_lat': float(start_point['latitude']),
+            'start_lon': float(start_point['longitude']),
+            'end_lat': float(end_point['latitude']),
+            'end_lon': float(end_point['longitude']),
+            'distance_meters': distance,
+            'bearing_degrees': bearing,
+            'turn_angle': 0,  # 이후 경로 연결 시 계산
+            'estimated_time_sec': estimated_time
+        }
+    
+    def _calculate_bearing(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """두 GPS 좌표 간의 방향각 계산 (북쪽 기준 0도)"""
+        lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+        
+        dlon = lon2 - lon1
+        y = math.sin(dlon) * math.cos(lat2)
+        x = (math.cos(lat1) * math.sin(lat2) - 
+             math.sin(lat1) * math.cos(lat2) * math.cos(dlon))
+        
+        bearing = math.atan2(y, x)
+        bearing = math.degrees(bearing)
+        bearing = (bearing + 360) % 360  # 0-360도 범위로 변환
+        
+        return bearing
+    
+    def generate_navigation_instruction(self, segment: Dict, prev_bearing: float = None) -> Dict:
+        """세그먼트의 네비게이션 안내 생성"""
+        distance = segment.get('distance_meters', 0)
+        bearing = segment.get('bearing_degrees', 0)
+        difficulty = segment.get('difficulty_score', 0)
+        cluster_label = segment.get('cluster_label', 0)
+        
+        # 방향 지시어
+        if distance < 5:
+            direction_text = ""
+        else:
+            direction_text = f"{distance:.0f}m"
+        
+        # 회전 정보 (이전 방향각이 있는 경우)
+        turn_instruction = ""
+        if prev_bearing is not None:
+            turn_angle = bearing - prev_bearing
+            if turn_angle > 180:
+                turn_angle -= 360
+            elif turn_angle < -180:
+                turn_angle += 360
+            
+            segment['turn_angle'] = turn_angle
+            
+            if abs(turn_angle) < 15:
+                turn_instruction = "직진"
+            elif 15 <= turn_angle < 45:
+                turn_instruction = "약간 우회전"
+            elif turn_angle >= 45:
+                turn_instruction = "우회전"
+            elif -45 < turn_angle <= -15:
+                turn_instruction = "약간 좌회전"
+            else:
+                turn_instruction = "좌회전"
+        else:
+            turn_instruction = "직진"
+        
+        # 기본 안내 메시지
+        if direction_text:
+            instruction = f"{turn_instruction} {direction_text}"
+        else:
+            instruction = turn_instruction
+        
+        # 난이도 기반 주의사항
+        warnings = []
+        accessibility_level = ""
+        
+        if difficulty < 0.2:
+            accessibility_level = "휠체어 이동 용이"
+        elif difficulty < 0.4:
+            accessibility_level = "휠체어 이동 가능"
+        elif difficulty < 0.6:
+            accessibility_level = "휠체어 이동 주의"
+            warnings.append("약간의 주의 필요")
+        elif difficulty < 0.8:
+            accessibility_level = "휠체어 이동 어려움"
+            warnings.append("험난한 구간")
+        else:
+            accessibility_level = "휠체어 이동 매우 어려움"
+            warnings.append("매우 험난한 구간")
+        
+        # 센서 기반 구체적 경고
+        vibration = segment.get('vibration_rms', 0)
+        rotation = segment.get('rotation_std', 0)
+        height_change = segment.get('height_change', 0)
+        
+        if vibration > 4.0:
+            warnings.append("노면이 거침")
+        if rotation > 1.0:
+            warnings.append("균형 주의")
+        if abs(height_change) > 2.0:
+            if height_change > 0:
+                warnings.append("오르막")
+            else:
+                warnings.append("내리막")
+        
+        # 최종 메시지 조합
+        warning_text = ""
+        if warnings:
+            warning_text = " - " + ", ".join(warnings)
+        
+        return {
+            'navigation_instruction': instruction,
+            'warning_message': warning_text,
+            'accessibility_level': accessibility_level,
+            'warnings': warnings
+        }
+    
+    def save_navigation_segments(self, edges: Dict[str, Dict]) -> bool:
+        """네비게이션 정보가 포함된 세그먼트 저장"""
+        self.logger.info("💾 네비게이션 세그먼트 저장 중...")
+        
+        # 기존 세그먼트 데이터 삭제
+        delete_query = "DELETE FROM segments"
+        self.execute_query(delete_query)
+        
+        insert_query = """
+        INSERT INTO segments (
+            edge_id, segment_number, start_time, end_time, duration,
+            vibration_rms, vibration_std, vibration_max,
+            rotation_mean, rotation_std, rotation_max,
+            height_change, velocity_mean, velocity_std,
+            cluster_label, difficulty_score,
+            start_lat, start_lon, end_lat, end_lon,
+            distance_meters, bearing_degrees, turn_angle,
+            navigation_instruction, warning_message, estimated_time_sec,
+            accessibility_level, is_merged, original_segment_ids
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        saved_count = 0
+        for edge_id, edge_info in edges.items():
+            if 'segments' not in edge_info:
+                continue
+            
+            # 세그먼트 병합
+            original_segments = edge_info['segments']
+            merged_segments = self.merge_similar_segments(original_segments)
+            
+            # GPS 데이터
+            gps_data = edge_info.get('gps_data')
+            prev_bearing = None
+            
+            for i, segment in enumerate(merged_segments):
+                # 네비게이션 정보 계산
+                nav_info = self.calculate_navigation_info(gps_data, segment)
+                instruction_info = self.generate_navigation_instruction(segment, prev_bearing)
+                
+                # 회전각 업데이트
+                segment.update(nav_info)
+                segment.update(instruction_info)
+                
+                prev_bearing = nav_info['bearing_degrees']
+                
+                params = (
+                    edge_id,
+                    i + 1,  # 새로운 세그먼트 번호
+                    float(segment['start_time']),
+                    float(segment['end_time']),
+                    float(segment['duration']),
+                    float(segment.get('vibration_rms', 0)),
+                    float(segment.get('vibration_std', 0)),
+                    float(segment.get('vibration_max', 0)),
+                    float(segment.get('rotation_mean', 0)),
+                    float(segment.get('rotation_std', 0)),
+                    float(segment.get('rotation_max', 0)),
+                    float(segment.get('height_change', 0)),
+                    float(segment.get('velocity_mean', 0)),
+                    float(segment.get('velocity_std', 0)),
+                    segment.get('cluster_label'),
+                    float(segment['difficulty_score']),
+                    nav_info.get('start_lat'),
+                    nav_info.get('start_lon'),
+                    nav_info.get('end_lat'),
+                    nav_info.get('end_lon'),
+                    float(nav_info.get('distance_meters', 0)),
+                    float(nav_info.get('bearing_degrees', 0)),
+                    float(segment.get('turn_angle', 0)),
+                    instruction_info.get('navigation_instruction'),
+                    instruction_info.get('warning_message'),
+                    float(nav_info.get('estimated_time_sec', 0)),
+                    instruction_info.get('accessibility_level'),
+                    segment.get('is_merged', False),
+                    json.dumps(segment.get('original_segment_ids', []))
+                )
+                
+                if self.execute_query(insert_query, params):
+                    saved_count += 1
+        
+        self.connection.commit()
+        self.logger.info(f"✅ 네비게이션 세그먼트 저장 완료: {saved_count}개")
+        return saved_count > 0
 
 # 사용 예시
 if __name__ == "__main__":
